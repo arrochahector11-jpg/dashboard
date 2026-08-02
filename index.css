@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+:root {
+  --color-navy: #0f2540;
+  --color-navy-light: #1a3a5c;
+  --color-orange: #e8823a;
+  --color-orange-light: #f5a662;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background-color: #f4f6f9;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
