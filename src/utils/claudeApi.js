@@ -88,6 +88,57 @@ Devolvé el JSON con la fórmula correcta para este pedido.`;
 }
 
 /**
+ * Motor de clasificación de negocio: el usuario describe reglas en lenguaje
+ * natural (como "Notas y Supuestos" de un informe ejecutivo) y Claude genera
+ * una función JS real que las aplica sobre los datos completos.
+ *
+ * Devuelve { explicacion, id_columna, categorias, supuestos_o_limitaciones, js_function_body }
+ * js_function_body es el CUERPO de una función: function classify(rows, ctx) { ... return "Categoria"; }
+ * "rows" es el array de todas las filas que comparten el mismo valor de id_columna
+ * (o una sola fila si id_columna es null). "ctx" trae { parseDate, referenceDate }.
+ */
+export async function generateClassification({ instruction, headers, sample, referenceDateISO }) {
+  const systemPrompt = `Sos un analista de datos senior experto en clasificar registros de negocio (obras, tickets, proyectos, inventario, ventas, lo que sea) según reglas que te da el usuario en lenguaje natural, tal como las escribiría en una nota de "supuestos y criterios" de un informe ejecutivo.
+
+Tu tarea: generar código JavaScript real (no simulado) que implemente esas reglas, para correr en el navegador sobre TODAS las filas del dataset (no una muestra).
+
+Devolvés SOLO un JSON (sin markdown, sin backticks, sin texto extra) con esta estructura exacta:
+
+{
+  "explicacion": "explicación breve en español natural de qué vas a clasificar y cómo, como se lo dirías a un colega",
+  "id_columna": "nombre exacto de la columna que identifica un registro único (ej: COD_OBRA), o null si cada fila ya es un registro único y no hay que agrupar",
+  "categorias": ["Lista", "de", "las", "categorías", "posibles", "que", "puede", "devolver", "la", "función"],
+  "supuestos_o_limitaciones": "si alguna regla no se puede aplicar 100% por falta de una columna de fecha u otro dato, explicalo acá con honestidad. Si no hay ninguna limitación, poné null",
+  "js_function_body": "el CUERPO de una función JS (sin la declaración 'function', solo lo que va adentro de las llaves) que recibe (rows, ctx) donde rows es un array de objetos (todas las filas de un mismo id_columna, o un array de un solo elemento si id_columna es null) y ctx = {parseDate, referenceDate}. Debe hacer 'return \\"NombreCategoria\\";' al final. Usá rows[0]['NombreDeColumna'] para leer campos. Usá ctx.parseDate(valor) para convertir un valor a objeto Date de forma segura (puede devolver null). Usá ctx.referenceDate como fecha de referencia (objeto Date). NO uses async/await. NO uses console.log. El código debe ser robusto ante valores null/undefined."
+}
+
+Reglas importantes:
+- Si el usuario menciona un umbral de días/fechas pero la columna necesaria no aparece en los headers dados, decilo explícitamente en "supuestos_o_limitaciones" y hacé que la función devuelva una categoría tipo "Requiere revisión manual (falta columna X)" en esos casos, en vez de inventar un resultado.
+- Sé preciso con los nombres exactos de columnas, tal como aparecen en el listado que te paso (son case-sensitive).
+- El código debe ser eficiente porque puede correr sobre miles de registros.`;
+
+  const userPrompt = `Reglas de clasificación que pidió el usuario (en sus palabras):
+"${instruction}"
+
+Columnas disponibles: ${JSON.stringify(headers)}
+
+Muestra de filas (primeras 5):
+${JSON.stringify(sample.slice(0, 5), null, 1)}
+
+Fecha de referencia a usar como "hoy" para cálculos de antigüedad: ${referenceDateISO}
+
+Generá la función de clasificación.`;
+
+  const raw = await callClaude(systemPrompt, userPrompt, 2000);
+  const cleaned = raw.replace(/```json|```/g, "").trim();
+  try {
+    return JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error("No pude generar la clasificación. Probá describir las reglas de forma más simple o por partes.");
+  }
+}
+
+/**
  * Le pide a Claude que sugiera qué tarjetas KPI y gráficos armar
  * según las columnas detectadas de un archivo nuevo (analizador dinámico).
  */
