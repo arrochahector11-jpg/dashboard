@@ -91,6 +91,13 @@ function App() {
           </div>
         )}
       </main>
+
+      {showApiModal && (
+        <ApiKeyModal
+          onClose={() => setShowApiModal(false)}
+          onSaved={() => setApiKeySet(true)}
+        />
+      )}
     </div>
   );
 }
