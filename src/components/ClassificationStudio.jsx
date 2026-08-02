@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { Bar, Doughnut } from "react-chartjs-2";
-import { Sparkles, Send, AlertTriangle, Download, Loader2, CheckCircle2 } from "lucide-react";
+import { Sparkles, Send, AlertTriangle, Download, Loader2, CheckCircle2, X, MousePointerClick } from "lucide-react";
 import { generateClassification } from "../utils/claudeApi";
 import { PALETTE } from "../utils/chartSetup";
 import KpiCard from "./KpiCard";
@@ -35,6 +35,7 @@ export default function ClassificationStudio({ fileData, onNeedApiKey }) {
   const [results, setResults] = useState(null);
   const [secondaryCol, setSecondaryCol] = useState(headers[0]);
   const [referenceDate, setReferenceDate] = useState(new Date().toISOString().slice(0, 10));
+  const [drillDown, setDrillDown] = useState(null); // { categoria, secundario? }
 
   async function handleGenerate() {
     if (!instruction.trim()) return;
@@ -159,13 +160,59 @@ export default function ClassificationStudio({ fileData, onNeedApiKey }) {
 
   const chartOptions = {
     responsive: true,
+    onClick: (evt, elements, chart) => {
+      if (!elements.length) return;
+      const idx = elements[0].index;
+      const label = chart.data.labels[idx];
+      setDrillDown({ categoria: label });
+    },
     plugins: { legend: { position: "bottom", labels: { boxWidth: 12, font: { size: 10 } } } },
     scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
   };
   const stackedOptions = {
     ...chartOptions,
+    onClick: (evt, elements, chart) => {
+      if (!elements.length) return;
+      const el = elements[0];
+      const secVal = chart.data.labels[el.index];
+      const cat = chart.data.datasets[el.datasetIndex].label;
+      setDrillDown({ categoria: cat, secundario: secVal });
+    },
     scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { precision: 0 } } },
   };
+
+  const drillDownRows = useMemo(() => {
+    if (!drillDown || !results) return [];
+    return results.classified.filter((c) => {
+      if (c.categoria !== drillDown.categoria) return false;
+      if (drillDown.secundario !== undefined) {
+        const secVal = String(c.rows[0][secondaryCol] ?? "(vacío)").trim() || "(vacío)";
+        if (secVal !== drillDown.secundario) return false;
+      }
+      return true;
+    });
+  }, [drillDown, results, secondaryCol]);
+
+  const drillDownCols = useMemo(() => {
+    if (!drillDownRows.length) return [];
+    const idCol = plan?.id_columna;
+    const priority = [idCol, ...headers.filter((h) => /descrip|nombre|titulo|título/i.test(h))].filter(Boolean);
+    const rest = headers.filter((h) => !priority.includes(h));
+    return [...new Set([...priority, secondaryCol, ...rest])].slice(0, 6);
+  }, [drillDownRows, plan, headers, secondaryCol]);
+
+  async function handleExportDrillDown() {
+    if (!drillDownRows.length) return;
+    const workbook = new ExcelJS.Workbook();
+    const ws = workbook.addWorksheet("Detalle");
+    ws.addRow(headers);
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF0F2540" } };
+    drillDownRows.forEach((c) => ws.addRow(headers.map((h) => c.rows[0][h] ?? "")));
+    ws.columns.forEach((col) => (col.width = 18));
+    const buffer = await workbook.xlsx.writeBuffer();
+    saveAs(new Blob([buffer]), `detalle_${drillDown.categoria}.xlsx`);
+  }
 
   async function handleExport() {
     if (!results || !plan) return;
@@ -309,18 +356,71 @@ export default function ClassificationStudio({ fileData, onNeedApiKey }) {
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Total por categoría</h3>
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Total por categoría</h3>
+              <p className="text-xs text-slate-400 mb-3 flex items-center gap-1"><MousePointerClick size={12} /> Tocá una barra para ver el detalle</p>
               <Bar data={barData} options={chartOptions} />
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Distribución de categorías</h3>
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Distribución de categorías</h3>
+              <p className="text-xs text-slate-400 mb-3 flex items-center gap-1"><MousePointerClick size={12} /> Tocá una porción para ver el detalle</p>
               <Doughnut data={doughnutData} options={chartOptions} />
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-slate-100 p-4 lg:col-span-2">
-              <h3 className="text-sm font-semibold text-slate-700 mb-3">Categoría × {secondaryCol}</h3>
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Categoría × {secondaryCol}</h3>
+              <p className="text-xs text-slate-400 mb-3 flex items-center gap-1"><MousePointerClick size={12} /> Tocá un segmento para ver el detalle</p>
               <Bar data={stackedData} options={stackedOptions} />
             </div>
           </div>
+
+          {drillDown && (
+            <div className="bg-white rounded-xl shadow-sm border-2 border-orange-200 p-4">
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-800">
+                    Detalle: {drillDown.categoria}
+                    {drillDown.secundario !== undefined && ` — ${secondaryCol}: ${drillDown.secundario}`}
+                  </h3>
+                  <p className="text-xs text-slate-500">{drillDownRows.length} registros encontrados</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleExportDrillDown}
+                    className="flex items-center gap-1.5 bg-[#0f2540] hover:bg-[#1a3a5c] text-white text-xs px-3 py-1.5 rounded-lg"
+                  >
+                    <Download size={12} /> Exportar este grupo
+                  </button>
+                  <button onClick={() => setDrillDown(null)} className="text-slate-400 hover:text-red-500">
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-x-auto max-h-80 overflow-y-auto border border-slate-100 rounded-lg">
+                <table className="w-full text-xs">
+                  <thead className="bg-slate-50 sticky top-0">
+                    <tr>
+                      {drillDownCols.map((col) => (
+                        <th key={col} className="text-left px-3 py-2 font-medium text-slate-500 whitespace-nowrap">{col}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {drillDownRows.slice(0, 200).map((c, i) => (
+                      <tr key={i} className="border-t border-slate-50 hover:bg-slate-50">
+                        {drillDownCols.map((col) => (
+                          <td key={col} className="px-3 py-2 text-slate-700 whitespace-nowrap max-w-[220px] truncate">
+                            {String(c.rows[0][col] ?? "")}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {drillDownRows.length > 200 && (
+                <p className="text-xs text-slate-400 mt-2">Mostrando los primeros 200 de {drillDownRows.length}. Exportá para ver todos.</p>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
