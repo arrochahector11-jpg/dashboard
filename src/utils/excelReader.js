@@ -1,24 +1,32 @@
 import * as XLSX from "xlsx";
 
 /**
- * Lee un archivo Excel y devuelve un objeto con:
- * - headers: nombres de columnas (fila 1)
- * - rows: array de objetos { columna: valor }
- * - sheetName: nombre de la hoja usada
- * - raw: matriz cruda (para casos donde headers no están en fila 1)
+ * Lee TODAS las hojas de un Excel. Devuelve headers/rows de la hoja con
+ * más filas de datos por defecto (evita el bug de quedarse con la primera
+ * hoja si esa no es la que tiene los datos reales), pero deja disponibles
+ * todas las hojas para que el usuario pueda cambiar.
  */
-export async function readExcelFile(file) {
+export async function readExcelFile(file, forcedSheetName) {
   const buffer = await file.arrayBuffer();
   const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-  const sheetName = workbook.SheetNames[0];
-  const sheet = workbook.Sheets[sheetName];
 
-  const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
-  const headers = (raw[0] || []).map((h, i) =>
+  const sheetsParsed = workbook.SheetNames.map((name) => {
+    const sheet = workbook.Sheets[name];
+    const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+    const nonEmptyRows = raw.filter((r) => r.some((cell) => cell !== "" && cell !== undefined && cell !== null));
+    return { name, raw, rowCount: nonEmptyRows.length };
+  });
+
+  // Elegir automáticamente la hoja con más filas de datos (no siempre es la primera)
+  const bestSheet = forcedSheetName
+    ? sheetsParsed.find((s) => s.name === forcedSheetName) || sheetsParsed[0]
+    : sheetsParsed.reduce((best, s) => (s.rowCount > best.rowCount ? s : best), sheetsParsed[0]);
+
+  const headers = (bestSheet.raw[0] || []).map((h, i) =>
     h === "" || h === undefined ? `Columna ${indexToLetter(i)}` : String(h).trim()
   );
 
-  const rows = raw.slice(1)
+  const rows = bestSheet.raw.slice(1)
     .filter((r) => r.some((cell) => cell !== "" && cell !== undefined && cell !== null))
     .map((r) => {
       const obj = {};
@@ -30,11 +38,13 @@ export async function readExcelFile(file) {
 
   return {
     fileName: file.name,
-    sheetName,
+    sheetName: bestSheet.name,
     sheetNames: workbook.SheetNames,
+    sheetRowCounts: Object.fromEntries(sheetsParsed.map((s) => [s.name, s.rowCount])),
     headers,
     rows,
-    raw,
+    raw: bestSheet.raw,
+    _file: file, // se guarda para poder re-leer con otra hoja si el usuario la cambia
   };
 }
 
