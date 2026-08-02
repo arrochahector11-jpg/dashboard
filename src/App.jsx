@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { KeyRound, BarChart3, GitCompare } from "lucide-react";
+import { KeyRound, BarChart3, GitCompare, LayoutGrid } from "lucide-react";
 import "./utils/chartSetup";
 import FileUpload from "./components/FileUpload";
 import Dashboard from "./components/Dashboard";
 import FormulaChat from "./components/FormulaChat";
 import ApiKeyModal from "./components/ApiKeyModal";
+import ClassificationStudio from "./components/ClassificationStudio";
 import { hasApiKey } from "./utils/claudeApi";
 
 function App() {
@@ -75,11 +76,22 @@ function App() {
               >
                 <GitCompare size={16} /> Cruces con fórmulas (IA)
               </button>
+              <button
+                onClick={() => setTab("clasificacion")}
+                className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  tab === "clasificacion" ? "border-orange-500 text-[#0f2540]" : "border-transparent text-slate-400 hover:text-slate-600"
+                }`}
+              >
+                <LayoutGrid size={16} /> Análisis Ejecutivo (IA)
+              </button>
             </div>
 
             {tab === "dashboard" && <Dashboard fileData={fileA} />}
             {tab === "cruces" && (
               <FormulaChat fileA={fileA} fileB={fileB} onNeedApiKey={() => setShowApiModal(true)} />
+            )}
+            {tab === "clasificacion" && (
+              <ClassificationStudio fileData={fileA} onNeedApiKey={() => setShowApiModal(true)} />
             )}
           </>
         )}
